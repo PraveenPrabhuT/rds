@@ -60,6 +60,35 @@ func init() {
 	connectCmd.Flags().BoolVarP(&lastConnected, "last", "l", false, "Connect to the last used RDS instance")
 	connectCmd.Flags().StringVarP(&instanceName, "name", "n", "", "Partial or complete RDS instance name")
 
+	// Dynamic completion for the --name flag
+	connectCmd.RegisterFlagCompletionFunc("name", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		ctx := context.Background()
+
+		// 1. Load config using the current profile
+		cfg, err := config.LoadDefaultConfig(ctx, config.WithSharedConfigProfile(awsProfile))
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+
+		// 2. Reuse the caching logic we designed
+		instances, err := getInstancesWithCache(ctx, cfg)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveError
+		}
+
+		var completions []string
+		for _, inst := range instances {
+			// 3. Zsh fix: Use ':' as a separator for descriptions to avoid backslash escaping
+			// Also ensure we only suggest IDs that start with what the user typed
+			if strings.HasPrefix(inst.ID, toComplete) {
+				completions = append(completions, fmt.Sprintf("%s:%s", inst.ID, inst.Size))
+			}
+		}
+
+		// 4. DirectiveNoFileComp is crucial to prevent Zsh from falling back to file paths
+		return completions, cobra.ShellCompDirectiveNoFileComp
+	})
+
 	rootCmd.AddCommand(connectCmd)
 }
 
