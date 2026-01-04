@@ -58,19 +58,19 @@ var connectCmd = &cobra.Command{
 
 func init() {
 	connectCmd.Flags().BoolVarP(&lastConnected, "last", "l", false, "Connect to the last used RDS instance")
-	connectCmd.Flags().StringVarP(&instanceName, "name", "n", "", "Partial or complete RDS instance name")
 
-	// Dynamic completion for the --name flag
-	connectCmd.RegisterFlagCompletionFunc("name", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	// Task: Register completion for the FIRST positional argument
+	connectCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if len(args) > 0 {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+
 		ctx := context.Background()
-
-		// 1. Load config using the current profile
 		cfg, err := config.LoadDefaultConfig(ctx, config.WithSharedConfigProfile(awsProfile))
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveError
 		}
 
-		// 2. Reuse the caching logic we designed
 		instances, err := getInstancesWithCache(ctx, cfg)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveError
@@ -78,16 +78,13 @@ func init() {
 
 		var completions []string
 		for _, inst := range instances {
-			// 3. Zsh fix: Use ':' as a separator for descriptions to avoid backslash escaping
-			// Also ensure we only suggest IDs that start with what the user typed
 			if strings.HasPrefix(inst.ID, toComplete) {
+				// We keep the ':' for Zsh to show the size as a description
 				completions = append(completions, fmt.Sprintf("%s:%s", inst.ID, inst.Size))
 			}
 		}
-
-		// 4. DirectiveNoFileComp is crucial to prevent Zsh from falling back to file paths
 		return completions, cobra.ShellCompDirectiveNoFileComp
-	})
+	}
 
 	rootCmd.AddCommand(connectCmd)
 }
@@ -103,7 +100,7 @@ func runConnect(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// Note: awsProfile is a global variable from root.go/main.go
+	// awsProfile is global in package 'cmd'
 	cfg, err := config.LoadDefaultConfig(ctx, config.WithSharedConfigProfile(awsProfile))
 	if err != nil {
 		fmt.Printf("❌ Unable to load SDK config: %v\n", err)
@@ -117,18 +114,24 @@ func runConnect(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	// 3. Selection Logic
+	// 3. Selection Logic Refactored
 	var selected InstanceInfo
-	if lastConnected {
-		selected, err = loadLastConnected(instances)
-	} else if instanceName != "" {
-		selected, err = findByName(instances, instanceName)
+	var selectErr error
+
+	// Priority: Positional Arg > Last Connected Flag > Fuzzy Finder
+	if len(args) > 0 {
+		// User provided: rds connect <partial_name>
+		selected, selectErr = findByName(instances, args[0])
+	} else if lastConnected {
+		// User provided: rds connect -l
+		selected, selectErr = loadLastConnected(instances)
 	} else {
-		selected, err = pickWithFuzzyFinder(instances)
+		// User provided: rds connect (Interactive mode)
+		selected, selectErr = pickWithFuzzyFinder(instances)
 	}
 
-	if err != nil {
-		fmt.Printf("❌ Selection Error: %v\n", err)
+	if selectErr != nil {
+		fmt.Printf("❌ Selection Error: %v\n", selectErr)
 		return
 	}
 
@@ -139,10 +142,11 @@ func runConnect(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	// 5. Connect Strategy
+	// 5. Connection Execution
 	saveLastID(selected.ID)
 	fmt.Printf("\n🚀 Target: %s [%s]\n", selected.ID, selected.Host)
 
+	// Strategy: pgcli -> psql -> Native Fallback
 	if path, err := exec.LookPath("pgcli"); err == nil {
 		fmt.Println("✨ Launching pgcli...")
 		executeExternal(path, selected, creds)
@@ -150,7 +154,7 @@ func runConnect(cmd *cobra.Command, args []string) {
 		fmt.Println("📂 Launching psql...")
 		executeExternal(path, selected, creds)
 	} else {
-		fmt.Println("⚠️  No clients found. Launching Native Fallback...")
+		fmt.Println("⚠️  No binary clients found. Launching Native Fallback...")
 		runNativeConnect(selected.Host, selected.Port, creds.Username, creds.Password, "postgres")
 	}
 }
