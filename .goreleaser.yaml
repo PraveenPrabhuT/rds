@@ -8,6 +8,7 @@ before:
     # 1. Build a temporary binary for generating completions
     - go build -o /tmp/rds-gen .
     # 2. Generate the completions
+    - sh -c '/tmp/rds-gen gen-docs --dir ./docs/reference'
     - sh -c '/tmp/rds-gen completion bash > completions.bash'
     - sh -c '/tmp/rds-gen completion zsh > completions.zsh'
     - sh -c '/tmp/rds-gen completion fish > completions.fish'

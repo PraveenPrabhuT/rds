@@ -50,10 +50,21 @@ var (
 
 // We define the command here. Note: rootCmd must be accessible.
 // If your rootCmd is in root.go (common Cobra structure), this works perfectly.
+// In cmd/connect.go
 var connectCmd = &cobra.Command{
-	Use:   "connect",
+	Use:   "connect [rds-identifier]",
 	Short: "Connect to an RDS PostgreSQL instance",
-	Run:   runConnect,
+	Long: `Connect dynamically fetches credentials from AWS Secrets Manager 
+and establishes a connection using pgcli, psql, or a native Go fallback. 
+It requires an active Pritunl VPN connection matching the AWS Profile.`,
+	Example: `  # Interactive selection
+  rds connect
+
+  # Direct connection with partial name
+  rds connect acko-health
+
+  # Reconnect to the last used instance for the current profile
+  rds connect -l`,
 }
 
 func init() {

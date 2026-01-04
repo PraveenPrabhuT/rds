@@ -11,15 +11,24 @@ import (
 
 var awsProfile string
 
+var (
+	Version = "dev"
+	Commit  = "none"
+	Date    = "unknown"
+)
+
 var rootCmd = &cobra.Command{
-	Use:   "rds",
-	Short: "A powerful CLI toolkit for AWS RDS management",
+	Use:     "rds",
+	Short:   "A powerful CLI toolkit for AWS RDS management",
+	Version: Version, // This enables the 'rds --version' flag automatically
 	Run: func(cmd *cobra.Command, args []string) {
 		cmd.Help()
 	},
 }
 
 func Execute() {
+	rootCmd.SetVersionTemplate(fmt.Sprintf("rds version %s (commit: %s, built: %s)\n", Version, Commit, Date))
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
