@@ -1,0 +1,69 @@
+version: 2 # Using GoReleaser v2 schema
+
+project_name: rds
+
+before:
+  hooks:
+    - go mod tidy
+    # 1. Build a temporary binary for generating completions
+    - go build -o /tmp/rds-gen .
+    # 2. Generate the completions
+    - sh -c '/tmp/rds-gen completion bash > completions.bash'
+    - sh -c '/tmp/rds-gen completion zsh > completions.zsh'
+    - sh -c '/tmp/rds-gen completion fish > completions.fish'
+
+# 1. BUILD CONFIGURATION
+builds:
+  - env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin # macOS
+      - linux # Linux
+    goarch:
+      - amd64 # Intel
+      - arm64 # Apple Silicon / ARM
+
+    # Strip debug symbols (-s -w) and inject metadata into cmd package
+    ldflags:
+      - -s -w
+      - -X rds/cmd.Version={{.Version}}
+
+# 2. ARCHIVE CONFIGURATION
+archives:
+  - format: tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - completions.bash
+      - completions.zsh
+      - completions.fish
+
+# 3. CHECKSUMS
+checksum:
+  name_template: "checksums.txt"
+
+# 4. HOMEBREW TAP CONFIGURATION
+brews:
+  - name: rds
+    repository:
+      owner: PraveenPrabhuT
+      name: homebrew-tap
+      token: "{{ .Env.GORELEASER_TOKEN }}"
+
+    directory: Formula
+    description: "Context-aware AWS RDS toolkit with native Go fallback"
+    homepage: "https://github.com/PraveenPrabhuT/rds"
+    license: "MIT"
+
+    # Install instructions for Homebrew
+    install: |
+      bin.install "rds"
+
+      # Install Shell Completions
+      bash_completion.install "completions.bash" => "rds"
+      zsh_completion.install "completions.zsh" => "_rds"
+      fish_completion.install "completions.fish" => "rds.fish"
+
+    test: |
+      system "#{bin}/rds --version"

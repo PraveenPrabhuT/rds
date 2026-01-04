@@ -125,7 +125,7 @@ func runConnect(cmd *cobra.Command, args []string) {
 		selected, selectErr = findByName(instances, args[0])
 	} else if lastConnected {
 		// User provided: rds connect -l
-		selected, selectErr = loadLastConnected(instances)
+		selected, selectErr = loadLastConnected(instances, awsProfile)
 	} else {
 		// User provided: rds connect (Interactive mode)
 		selected, selectErr = pickWithFuzzyFinder(instances)
@@ -144,7 +144,7 @@ func runConnect(cmd *cobra.Command, args []string) {
 	}
 
 	// 5. Connection Execution
-	saveLastID(selected.ID)
+	saveLastID(selected.ID, awsProfile)
 	fmt.Printf("\n🚀 Target: %s [%s]\n", selected.ID, selected.Host)
 
 	// Strategy: pgcli -> psql -> Native Fallback
@@ -174,14 +174,16 @@ func checkVPNWithPritunl() error {
 	bin := "/Applications/Pritunl.app/Contents/Resources/pritunl-client"
 	out, err := exec.Command(bin, "list", "-j").Output()
 	if err != nil {
-		return fmt.Errorf("pritunl-client not found")
+		return fmt.Errorf("pritunl-client utility not found or failed to execute")
 	}
 
 	var conns []PritunlConnection
-	json.Unmarshal(out, &conns)
+	if err := json.Unmarshal(out, &conns); err != nil {
+		return fmt.Errorf("failed to parse Pritunl JSON output")
+	}
 
 	for _, c := range conns {
-		if exists && c.Name == requiredVPN && c.Connected {
+		if exists && strings.Contains(c.Name, requiredVPN) && c.Connected {
 			return nil
 		} else if !exists && c.Connected {
 			return nil
@@ -283,23 +285,31 @@ func executeExternal(bin string, inst InstanceInfo, creds RDSCreds) {
 
 // --- Persistence ---
 
-func saveLastID(id string) {
-	path := filepath.Join(os.Getenv("HOME"), ".cache", "rds", "last_connected")
+func saveLastID(id, profile string) {
+	cacheDir := filepath.Join(os.Getenv("HOME"), ".cache", "rds")
+	// Use the profile name in the filename for isolation
+	path := filepath.Join(cacheDir, fmt.Sprintf("%s_last_connected", profile))
+
+	os.MkdirAll(cacheDir, 0755)
 	os.WriteFile(path, []byte(id), 0644)
 }
 
-func loadLastConnected(instances []InstanceInfo) (InstanceInfo, error) {
-	path := filepath.Join(os.Getenv("HOME"), ".cache", "rds", "last_connected")
+func loadLastConnected(instances []InstanceInfo, profile string) (InstanceInfo, error) {
+	cacheDir := filepath.Join(os.Getenv("HOME"), ".cache", "rds")
+	path := filepath.Join(cacheDir, fmt.Sprintf("%s_last_connected", profile))
+
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return InstanceInfo{}, fmt.Errorf("no history")
+		return InstanceInfo{}, fmt.Errorf("no history found for profile '%s'", profile)
 	}
+
+	lastID := string(data)
 	for _, inst := range instances {
-		if inst.ID == string(data) {
+		if inst.ID == lastID {
 			return inst, nil
 		}
 	}
-	return InstanceInfo{}, fmt.Errorf("last used instance not found")
+	return InstanceInfo{}, fmt.Errorf("last used instance '%s' not found in current profile", lastID)
 }
 
 // --- Native Fallback Implementation ---
