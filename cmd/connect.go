@@ -59,8 +59,8 @@ var connectCmd = &cobra.Command{
 func init() {
 	connectCmd.Flags().BoolVarP(&lastConnected, "last", "l", false, "Connect to the last used RDS instance")
 
-	// Task: Register completion for the FIRST positional argument
 	connectCmd.ValidArgsFunction = func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// Only complete the first argument
 		if len(args) > 0 {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
@@ -79,8 +79,9 @@ func init() {
 		var completions []string
 		for _, inst := range instances {
 			if strings.HasPrefix(inst.ID, toComplete) {
-				// We keep the ':' for Zsh to show the size as a description
-				completions = append(completions, fmt.Sprintf("%s:%s", inst.ID, inst.Size))
+				// FIX: Use \t (Tab).
+				// Zsh will display the size but ONLY insert the ID into your terminal.
+				completions = append(completions, fmt.Sprintf("%s\t%s", inst.ID, inst.Size))
 			}
 		}
 		return completions, cobra.ShellCompDirectiveNoFileComp
@@ -163,9 +164,10 @@ func runConnect(cmd *cobra.Command, args []string) {
 
 func checkVPNWithPritunl() error {
 	vpnMapping := map[string]string{
-		"acko-dev":  "sso_ackodevvpnusers",
-		"acko-prod": "sso_ackoprodvpnusers",
-		"acko-life": "sso_ackolifevpnusers",
+		"ackodev":   "sso_ackodevvpnusers",
+		"ackoprod":  "sso_ackoprodvpnusers",
+		"ackolife":  "sso_ackolifevpnusers",
+		"ackodrive": "sso_ackodrive_prod",
 	}
 
 	requiredVPN, exists := vpnMapping[awsProfile]
