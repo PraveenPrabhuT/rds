@@ -85,11 +85,29 @@ func init() {
 		}
 
 		ctx := context.Background()
-		cfg, err := config.LoadDefaultConfig(ctx, config.WithSharedConfigProfile(awsProfile))
+
+		// 1. Logic to extract the region from the command line flags (-r or --region)
+		// Cobra completion passes the current flag state to us
+		rFlag, _ := cmd.Flags().GetString("region")
+
+		// 2. Prepare Config Options
+		opts := []func(*config.LoadOptions) error{
+			config.WithSharedConfigProfile(awsProfile),
+		}
+
+		// Priority: -r flag > AWS_REGION env > default config
+		if rFlag != "" {
+			opts = append(opts, config.WithRegion(rFlag))
+		} else if envRegion := os.Getenv("AWS_REGION"); envRegion != "" {
+			opts = append(opts, config.WithRegion(envRegion))
+		}
+
+		cfg, err := config.LoadDefaultConfig(ctx, opts...)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveError
 		}
 
+		// 3. Fetch/Cache instances for the SPECIFIC region
 		instances, err := getInstancesWithCache(ctx, cfg)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveError
@@ -98,8 +116,7 @@ func init() {
 		var completions []string
 		for _, inst := range instances {
 			if strings.HasPrefix(inst.ID, toComplete) {
-				// FIX: Use \t (Tab).
-				// Zsh will display the size but ONLY insert the ID into your terminal.
+				// Return ID \t Description (Size)
 				completions = append(completions, fmt.Sprintf("%s\t%s", inst.ID, inst.Size))
 			}
 		}
