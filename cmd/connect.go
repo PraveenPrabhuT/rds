@@ -65,6 +65,8 @@ It requires an active Pritunl VPN connection matching the AWS Profile.`,
 
   # Reconnect to the last used instance for the current profile
   rds connect -l`,
+	Args: cobra.MaximumNArgs(1),
+	Run:  runConnect,
 }
 
 func init() {
