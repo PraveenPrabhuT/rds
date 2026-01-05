@@ -137,8 +137,11 @@ func runConnect(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
-	defaultCfg, _ := config.LoadDefaultConfig(ctx, config.WithSharedConfigProfile(awsProfile))
-	homeRegion := defaultCfg.Region // This will be ap-south-1 from ~/.aws/config
+	baseCfg, _ := config.LoadDefaultConfig(ctx,
+		config.WithSharedConfigProfile(awsProfile),
+		config.WithRegion("ap-south-1"),
+	)
+	homeRegion := baseCfg.Region // Now guaranteed to be ap-south-1
 
 	// awsProfile is global in package 'cmd'
 	// 1. Prepare Config Options
@@ -312,17 +315,28 @@ func pickWithFuzzyFinder(instances []InstanceInfo) (InstanceInfo, error) {
 }
 
 func findByName(instances []InstanceInfo, name string) (InstanceInfo, error) {
+	// PASS 1: Check for an exact match first
+	for _, inst := range instances {
+		if inst.ID == name {
+			return inst, nil
+		}
+	}
+
+	// PASS 2: If no exact match, look for partial matches
 	var matches []InstanceInfo
 	for _, inst := range instances {
 		if strings.Contains(inst.ID, name) {
 			matches = append(matches, inst)
 		}
 	}
+
 	if len(matches) == 1 {
 		return matches[0], nil
 	} else if len(matches) > 1 {
+		// Only show fuzzy finder if there was no exact match AND multiple partial matches
 		return pickWithFuzzyFinder(matches)
 	}
+
 	return InstanceInfo{}, fmt.Errorf("no instance matching '%s'", name)
 }
 
