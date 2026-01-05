@@ -22,7 +22,12 @@ import (
 )
 
 // --- Structs ---
+const CacheVersion = "v2" // Increment this when InstanceInfo changes
 
+type CacheEnvelope struct {
+	Version   string         `json:"version"`
+	Instances []InstanceInfo `json:"instances"`
+}
 type InstanceInfo struct {
 	ID       string `json:"id"`
 	Host     string `json:"host"`
@@ -115,8 +120,22 @@ func runConnect(cmd *cobra.Command, args []string) {
 		os.Exit(1)
 	}
 
+	defaultCfg, _ := config.LoadDefaultConfig(ctx, config.WithSharedConfigProfile(awsProfile))
+	homeRegion := defaultCfg.Region // This will be ap-south-1 from ~/.aws/config
+
 	// awsProfile is global in package 'cmd'
-	cfg, err := config.LoadDefaultConfig(ctx, config.WithSharedConfigProfile(awsProfile))
+	// 1. Prepare Config Options
+	opts := []func(*config.LoadOptions) error{
+		config.WithSharedConfigProfile(awsProfile),
+	}
+
+	// If a region was passed via -r flag, use it; otherwise use default from .aws/config
+	if awsRegion != "" {
+		opts = append(opts, config.WithRegion(awsRegion))
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+
 	if err != nil {
 		fmt.Printf("❌ Unable to load SDK config: %v\n", err)
 		os.Exit(1)
@@ -151,7 +170,7 @@ func runConnect(cmd *cobra.Command, args []string) {
 	}
 
 	// 4. Fetch Secrets
-	creds, err := getRDSCredentials(ctx, cfg, selected)
+	creds, err := getRDSCredentials(ctx, cfg, selected, homeRegion)
 	if err != nil {
 		fmt.Printf("❌ Failed to retrieve secrets: %v\n", err)
 		return
@@ -212,19 +231,26 @@ func checkVPNWithPritunl() error {
 
 func getInstancesWithCache(ctx context.Context, cfg aws.Config) ([]InstanceInfo, error) {
 	cacheDir := filepath.Join(os.Getenv("HOME"), ".cache", "rds")
-	cacheFile := filepath.Join(cacheDir, fmt.Sprintf("%s_instances.json", awsProfile))
+	// NEW: Cache key includes both Profile AND Region
+	cacheFile := filepath.Join(cacheDir, fmt.Sprintf("%s_%s_instances.json", awsProfile, cfg.Region))
 
-	if info, err := os.Stat(cacheFile); err == nil && time.Since(info.ModTime()) < time.Hour {
-		data, _ := os.ReadFile(cacheFile)
-		var insts []InstanceInfo
-		if err := json.Unmarshal(data, &insts); err == nil {
-			return insts, nil
+	// 1. Read Cache
+	if data, err := os.ReadFile(cacheFile); err == nil {
+		var envelope CacheEnvelope
+		if err := json.Unmarshal(data, &envelope); err == nil {
+			info, _ := os.Stat(cacheFile)
+			// Ensure version match and TTL (1 hour)
+			if envelope.Version == CacheVersion && time.Since(info.ModTime()) < time.Hour {
+				return envelope.Instances, nil
+			}
 		}
 	}
 
-	fmt.Printf("🔍 Fetching RDS instances [Profile: %s]...\n", awsProfile)
-	client := rds.NewFromConfig(cfg)
-	out, err := client.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{})
+	fmt.Printf("🔍 Fetching RDS instances [%s:%s]...\n", awsProfile, cfg.Region)
+
+	// 2. Fetch from AWS
+	rdsClient := rds.NewFromConfig(cfg)
+	out, err := rdsClient.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{})
 	if err != nil {
 		return nil, err
 	}
@@ -236,16 +262,21 @@ func getInstancesWithCache(ctx context.Context, cfg aws.Config) ([]InstanceInfo,
 				ID:       aws.ToString(db.DBInstanceIdentifier),
 				Host:     aws.ToString(db.Endpoint.Address),
 				Size:     aws.ToString(db.DBInstanceClass),
-				Port:     *db.Endpoint.Port, // Safely dereferencing
+				Port:     *db.Endpoint.Port,
 				Version:  aws.ToString(db.EngineVersion),
 				SourceID: aws.ToString(db.ReadReplicaSourceDBInstanceIdentifier),
 			})
 		}
 	}
 
+	// 3. Save Cache
 	os.MkdirAll(cacheDir, 0755)
-	data, _ := json.Marshal(instances)
-	os.WriteFile(cacheFile, data, 0644)
+	newCacheData, _ := json.Marshal(CacheEnvelope{
+		Version:   CacheVersion,
+		Instances: instances,
+	})
+	os.WriteFile(cacheFile, newCacheData, 0644)
+
 	return instances, nil
 }
 
@@ -278,21 +309,31 @@ func findByName(instances []InstanceInfo, name string) (InstanceInfo, error) {
 	return InstanceInfo{}, fmt.Errorf("no instance matching '%s'", name)
 }
 
-func getRDSCredentials(ctx context.Context, cfg aws.Config, selected InstanceInfo) (RDSCreds, error) {
-	sm := secretsmanager.NewFromConfig(cfg)
-
-	// Determine which instance ID holds the secrets
+func getRDSCredentials(ctx context.Context, cfg aws.Config, selected InstanceInfo, homeRegion string) (RDSCreds, error) {
+	// Determine the secret ID (handling the ARN pivot)
 	secretTargetID := selected.ID
 	if selected.SourceID != "" {
-		fmt.Printf("ℹ️  Detected replica. Pivoting secret lookup to source: %s\n", selected.SourceID)
-		secretTargetID = selected.SourceID
+		if strings.HasPrefix(selected.SourceID, "arn:aws:rds:") {
+			parts := strings.Split(selected.SourceID, ":")
+			if len(parts) >= 7 {
+				secretTargetID = parts[6]
+				fmt.Printf("🌐 DR Replica detected. Fetching master secret '%s' from primary region: %s\n",
+					secretTargetID, homeRegion)
+			}
+		} else {
+			secretTargetID = selected.SourceID
+		}
 	}
+
+	sm := secretsmanager.NewFromConfig(cfg, func(o *secretsmanager.Options) {
+		o.Region = homeRegion
+	})
 
 	secretID := fmt.Sprintf("root/%s/psql", secretTargetID)
 	out, err := sm.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{SecretId: &secretID})
 
 	if err != nil {
-		return RDSCreds{}, fmt.Errorf("failed to fetch secret '%s': %w", secretID, err)
+		return RDSCreds{}, fmt.Errorf("failed to fetch secret '%s' in %s: %w", secretID, homeRegion, err)
 	}
 
 	var creds RDSCreds

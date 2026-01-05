@@ -10,6 +10,7 @@ import (
 )
 
 var awsProfile string
+var awsRegion string
 
 var (
 	Version = "dev"
@@ -37,6 +38,7 @@ func Execute() {
 
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&awsProfile, "profile", "p", os.Getenv("AWS_PROFILE"), "AWS profile to use")
+	rootCmd.PersistentFlags().StringVarP(&awsRegion, "region", "r", "", "AWS Region (overrides config/env)")
 
 	// Dynamic completion for the --profile flag
 	rootCmd.RegisterFlagCompletionFunc("profile", func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
