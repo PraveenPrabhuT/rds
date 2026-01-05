@@ -24,11 +24,12 @@ import (
 // --- Structs ---
 
 type InstanceInfo struct {
-	ID      string `json:"id"`
-	Host    string `json:"host"`
-	Size    string `json:"size"`
-	Port    int32  `json:"port"`
-	Version string `json:"version"`
+	ID       string `json:"id"`
+	Host     string `json:"host"`
+	Size     string `json:"size"`
+	Port     int32  `json:"port"`
+	Version  string `json:"version"`
+	SourceID string `json:"source_id"`
 }
 
 type RDSCreds struct {
@@ -150,7 +151,7 @@ func runConnect(cmd *cobra.Command, args []string) {
 	}
 
 	// 4. Fetch Secrets
-	creds, err := getRDSCredentials(ctx, cfg, selected.ID)
+	creds, err := getRDSCredentials(ctx, cfg, selected)
 	if err != nil {
 		fmt.Printf("❌ Failed to retrieve secrets: %v\n", err)
 		return
@@ -232,11 +233,12 @@ func getInstancesWithCache(ctx context.Context, cfg aws.Config) ([]InstanceInfo,
 	for _, db := range out.DBInstances {
 		if aws.ToString(db.Engine) == "postgres" {
 			instances = append(instances, InstanceInfo{
-				ID:      aws.ToString(db.DBInstanceIdentifier),
-				Host:    aws.ToString(db.Endpoint.Address),
-				Size:    aws.ToString(db.DBInstanceClass),
-				Port:    *db.Endpoint.Port, // Safely dereferencing
-				Version: aws.ToString(db.EngineVersion),
+				ID:       aws.ToString(db.DBInstanceIdentifier),
+				Host:     aws.ToString(db.Endpoint.Address),
+				Size:     aws.ToString(db.DBInstanceClass),
+				Port:     *db.Endpoint.Port, // Safely dereferencing
+				Version:  aws.ToString(db.EngineVersion),
+				SourceID: aws.ToString(db.ReadReplicaSourceDBInstanceIdentifier),
 			})
 		}
 	}
@@ -276,15 +278,27 @@ func findByName(instances []InstanceInfo, name string) (InstanceInfo, error) {
 	return InstanceInfo{}, fmt.Errorf("no instance matching '%s'", name)
 }
 
-func getRDSCredentials(ctx context.Context, cfg aws.Config, id string) (RDSCreds, error) {
+func getRDSCredentials(ctx context.Context, cfg aws.Config, selected InstanceInfo) (RDSCreds, error) {
 	sm := secretsmanager.NewFromConfig(cfg)
-	secretID := fmt.Sprintf("root/%s/psql", id)
+
+	// Determine which instance ID holds the secrets
+	secretTargetID := selected.ID
+	if selected.SourceID != "" {
+		fmt.Printf("ℹ️  Detected replica. Pivoting secret lookup to source: %s\n", selected.SourceID)
+		secretTargetID = selected.SourceID
+	}
+
+	secretID := fmt.Sprintf("root/%s/psql", secretTargetID)
 	out, err := sm.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{SecretId: &secretID})
+
 	if err != nil {
+		return RDSCreds{}, fmt.Errorf("failed to fetch secret '%s': %w", secretID, err)
+	}
+
+	var creds RDSCreds
+	if err := json.Unmarshal([]byte(*out.SecretString), &creds); err != nil {
 		return RDSCreds{}, err
 	}
-	var creds RDSCreds
-	json.Unmarshal([]byte(*out.SecretString), &creds)
 	return creds, nil
 }
 

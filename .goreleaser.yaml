@@ -27,7 +27,9 @@ builds:
     # Strip debug symbols (-s -w) and inject metadata into cmd package
     ldflags:
       - -s -w
-      - -X rds/cmd.Version={{.Version}}
+      - -X github.com/PraveenPrabhuT/rds/cmd.Version={{.Version}}
+      - -X github.com/PraveenPrabhuT/rds/cmd.Commit={{.Commit}}
+      - -X github.com/PraveenPrabhuT/rds/cmd.Date={{.Date}}
 
 # 2. ARCHIVE CONFIGURATION
 archives:
