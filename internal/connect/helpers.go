@@ -52,15 +52,22 @@ func ValidatePritunlConnections(conns []PritunlConnection, profile string) error
 }
 
 // CheckVPNWithPritunl runs the Pritunl client and validates the current VPN state for profile.
+// If the Pritunl CLI is not installed (binary missing), it returns nil so the flow can continue
+// for users who use VPN via GUI or a different client.
 func CheckVPNWithPritunl(profile string) error {
 	bin := "/Applications/Pritunl.app/Contents/Resources/pritunl-client"
+	if _, err := os.Stat(bin); err != nil {
+		// CLI not installed — skip check and continue
+		return nil
+	}
 	out, err := exec.Command(bin, "list", "-j").Output()
 	if err != nil {
-		return fmt.Errorf("pritunl-client utility not found or failed to execute")
+		// CLI exists but failed (e.g. not running) — skip check and continue
+		return nil
 	}
 	var conns []PritunlConnection
 	if err := json.Unmarshal(out, &conns); err != nil {
-		return fmt.Errorf("failed to parse Pritunl JSON output")
+		return nil
 	}
 	return ValidatePritunlConnections(conns, profile)
 }

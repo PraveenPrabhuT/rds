@@ -14,11 +14,11 @@ type Options struct {
 	Args          []string
 }
 
-// Run performs VPN check, instance selection, credential fetch, and launches pgcli/psql or native client.
+// Run performs optional VPN check (if Pritunl CLI is present), instance selection, credential fetch, and launches pgcli/psql or native client.
 // It uses the AWS SDK and Pritunl; profile and region come from Options.
 func Run(ctx context.Context, opts Options) error {
 	if err := CheckVPNWithPritunl(opts.Profile); err != nil {
-		return fmt.Errorf("VPN check: %w", err)
+		fmt.Printf("⚠️  VPN check: %v (continuing anyway)\n", err)
 	}
 
 	cfg, homeRegion, err := loadAWSConfig(ctx, opts.Profile, opts.Region)
