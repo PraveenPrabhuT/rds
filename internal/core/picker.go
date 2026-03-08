@@ -22,6 +22,17 @@ func PickWithFuzzyFinder(instances []InstanceInfo) (InstanceInfo, error) {
 	return instances[idx], nil
 }
 
+// FindInstanceByEndpoint resolves an instance by matching its Endpoint.Address
+// against the given host string.
+func FindInstanceByEndpoint(instances []InstanceInfo, host string) (InstanceInfo, error) {
+	for _, inst := range instances {
+		if inst.Host == host {
+			return inst, nil
+		}
+	}
+	return InstanceInfo{}, fmt.Errorf("no instance with endpoint '%s'", host)
+}
+
 // FindByName resolves an instance by exact ID, partial match, or interactive
 // fuzzy selection when multiple candidates match.
 func FindByName(instances []InstanceInfo, name string) (InstanceInfo, error) {

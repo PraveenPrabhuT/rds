@@ -14,6 +14,7 @@ import (
 
 var (
 	lastConnected bool
+	connectHost   string
 	connectPort   int
 	connectDB     string
 )
@@ -38,6 +39,7 @@ It requires an active Pritunl VPN connection matching the AWS Profile.`,
 
 func init() {
 	connectCmd.Flags().BoolVarP(&lastConnected, "last", "l", false, "Connect to the last used RDS instance")
+	connectCmd.Flags().StringVar(&connectHost, "host", "", "RDS host endpoint (bypasses instance picker)")
 	connectCmd.Flags().IntVar(&connectPort, "port", 5432, "PostgreSQL port")
 	connectCmd.Flags().StringVarP(&connectDB, "db", "d", "postgres", "Database name to connect to")
 
@@ -91,6 +93,7 @@ func runConnect(c *cobra.Command, args []string) {
 		Profile:       awsProfile,
 		Region:        region,
 		LastConnected: lastConnected,
+		Host:          connectHost,
 		Port:          connectPort,
 		DB:            connectDB,
 		Args:          args,

@@ -13,6 +13,7 @@ type Options struct {
 	Profile       string
 	Region        string
 	LastConnected bool
+	Host          string
 	Port          int
 	DB            string
 	Args          []string
@@ -37,11 +38,14 @@ func Run(ctx context.Context, opts Options) error {
 	var selected core.InstanceInfo
 	var selectErr error
 
-	if len(opts.Args) > 0 {
+	switch {
+	case opts.Host != "":
+		selected, selectErr = core.FindInstanceByEndpoint(instances, opts.Host)
+	case len(opts.Args) > 0:
 		selected, selectErr = core.FindByName(instances, opts.Args[0])
-	} else if opts.LastConnected {
+	case opts.LastConnected:
 		selected, selectErr = core.LoadLastConnected(instances, opts.Profile)
-	} else {
+	default:
 		selected, selectErr = core.PickWithFuzzyFinder(instances)
 	}
 
