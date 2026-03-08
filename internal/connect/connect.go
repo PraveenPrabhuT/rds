@@ -16,6 +16,9 @@ type Options struct {
 	Host          string
 	Port          int
 	DB            string
+	JDBCURL       string
+	ShowJDBC      bool
+	CopyJDBC      bool
 	Args          []string
 }
 
@@ -37,29 +40,54 @@ func Run(ctx context.Context, opts Options) error {
 
 	var selected core.InstanceInfo
 	var selectErr error
-
-	switch {
-	case opts.Host != "":
-		selected, selectErr = core.FindInstanceByEndpoint(instances, opts.Host)
-	case len(opts.Args) > 0:
-		selected, selectErr = core.FindByName(instances, opts.Args[0])
-	case opts.LastConnected:
-		selected, selectErr = core.LoadLastConnected(instances, opts.Profile)
-	default:
-		selected, selectErr = core.PickWithFuzzyFinder(instances)
-	}
-
-	if selectErr != nil {
-		return fmt.Errorf("selection: %w", selectErr)
-	}
-
-	if opts.Port != 0 && int32(opts.Port) != selected.Port {
-		selected.Port = int32(opts.Port)
-	}
-
+	var connectHost string
+	var connectPort int32
 	dbname := opts.DB
 	if dbname == "" {
 		dbname = "postgres"
+	}
+
+	if opts.JDBCURL != "" {
+		urlHost, urlPort, urlDB, parseErr := ParseJDBCURL(opts.JDBCURL)
+		if parseErr != nil {
+			return fmt.Errorf("parse JDBC URL: %w", parseErr)
+		}
+
+		connectHost = urlHost
+		connectPort = int32(urlPort)
+		dbname = urlDB
+
+		resolved, err := ResolveCNAME(urlHost)
+		if err != nil {
+			return fmt.Errorf("resolve CNAME for %s: %w", urlHost, err)
+		}
+
+		selected, selectErr = core.FindInstanceByEndpoint(instances, resolved)
+		if selectErr != nil {
+			return fmt.Errorf("no RDS instance found for resolved host '%s' (from %s): %w", resolved, urlHost, selectErr)
+		}
+	} else {
+		switch {
+		case opts.Host != "":
+			selected, selectErr = core.FindInstanceByEndpoint(instances, opts.Host)
+		case len(opts.Args) > 0:
+			selected, selectErr = core.FindByName(instances, opts.Args[0])
+		case opts.LastConnected:
+			selected, selectErr = core.LoadLastConnected(instances, opts.Profile)
+		default:
+			selected, selectErr = core.PickWithFuzzyFinder(instances)
+		}
+
+		if selectErr != nil {
+			return fmt.Errorf("selection: %w", selectErr)
+		}
+
+		connectHost = selected.Host
+		connectPort = selected.Port
+	}
+
+	if opts.Port != 0 {
+		connectPort = int32(opts.Port)
 	}
 
 	creds, err := core.GetRDSCredentials(ctx, cfg, selected, homeRegion)
@@ -68,20 +96,34 @@ func Run(ctx context.Context, opts Options) error {
 	}
 
 	core.SaveLastID(selected.ID, opts.Profile)
-	fmt.Printf("\n🚀 Target: %s [%s]\n", selected.ID, selected.Host)
+	fmt.Printf("\n🚀 Target: %s [%s]\n", selected.ID, connectHost)
+
+	if opts.ShowJDBC {
+		jdbcURL := BuildJDBCURL(connectHost, connectPort, creds.Username, creds.Password, dbname)
+		fmt.Printf("\n📋 JDBC URL:\n%s\n\n", jdbcURL)
+		if opts.CopyJDBC {
+			copyToClipboard(jdbcURL)
+		}
+	}
+
+	connInfo := core.InstanceInfo{
+		ID:   selected.ID,
+		Host: connectHost,
+		Port: connectPort,
+	}
 
 	if path, err := exec.LookPath("pgcli"); err == nil {
 		fmt.Println("✨ Launching pgcli...")
-		executeExternal(path, selected, creds, dbname)
+		executeExternal(path, connInfo, creds, dbname)
 		return nil
 	}
 	if path, err := exec.LookPath("psql"); err == nil {
 		fmt.Println("📂 Launching psql...")
-		executeExternal(path, selected, creds, dbname)
+		executeExternal(path, connInfo, creds, dbname)
 		return nil
 	}
 
 	fmt.Println("⚠️  No binary clients found. Launching Native Fallback...")
-	runNativeConnect(selected.Host, selected.Port, creds.Username, creds.Password, dbname)
+	runNativeConnect(connectHost, connectPort, creds.Username, creds.Password, dbname)
 	return nil
 }

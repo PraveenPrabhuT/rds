@@ -17,6 +17,9 @@ var (
 	connectHost   string
 	connectPort   int
 	connectDB     string
+	connectURL    string
+	showJDBC      bool
+	copyJDBC      bool
 )
 
 var connectCmd = &cobra.Command{
@@ -42,6 +45,9 @@ func init() {
 	connectCmd.Flags().StringVar(&connectHost, "host", "", "RDS host endpoint (bypasses instance picker)")
 	connectCmd.Flags().IntVar(&connectPort, "port", 5432, "PostgreSQL port")
 	connectCmd.Flags().StringVarP(&connectDB, "db", "d", "postgres", "Database name to connect to")
+	connectCmd.Flags().StringVar(&connectURL, "url", "", "JDBC URL to connect (jdbc:postgresql://host[:port][/database])")
+	connectCmd.Flags().BoolVar(&showJDBC, "jdbc", false, "Print JDBC URL after resolving credentials")
+	connectCmd.Flags().BoolVar(&copyJDBC, "copy", false, "Copy JDBC URL to clipboard (use with --jdbc)")
 
 	connectCmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) > 0 {
@@ -96,6 +102,9 @@ func runConnect(c *cobra.Command, args []string) {
 		Host:          connectHost,
 		Port:          connectPort,
 		DB:            connectDB,
+		JDBCURL:       connectURL,
+		ShowJDBC:      showJDBC,
+		CopyJDBC:      copyJDBC,
 		Args:          args,
 	}
 
