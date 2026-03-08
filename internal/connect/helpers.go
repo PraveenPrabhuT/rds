@@ -1,7 +1,7 @@
 package connect
 
 import (
-	"database/sql"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,7 +9,7 @@ import (
 
 	"github.com/PraveenPrabhuT/rds/internal/core"
 	"github.com/chzyer/readline"
-	_ "github.com/lib/pq"
+	"github.com/jackc/pgx/v5"
 )
 
 func buildConnectArgs(inst core.InstanceInfo, creds core.RDSCreds) []string {
@@ -25,20 +25,13 @@ func executeExternal(bin string, inst core.InstanceInfo, creds core.RDSCreds) {
 }
 
 func runNativeConnect(host string, port int32, user, password, dbname string) {
-	connStr := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=require",
-		host, port, user, password, dbname)
-
-	db, err := sql.Open("postgres", connStr)
+	ctx := context.Background()
+	conn, err := core.NewPgxConn(ctx, host, port, user, password, dbname)
 	if err != nil {
 		fmt.Printf("❌ Connection Error: %v\n", err)
 		return
 	}
-	defer db.Close()
-
-	if err := db.Ping(); err != nil {
-		fmt.Printf("❌ Connection Failed: %v\n", err)
-		return
-	}
+	defer conn.Close(ctx)
 
 	fmt.Printf("✅ Connected to %s (Native Mode)\n", host)
 	rl, _ := readline.NewEx(&readline.Config{
@@ -58,28 +51,32 @@ func runNativeConnect(host string, port int32, user, password, dbname string) {
 		if query == "exit" || query == "quit" {
 			break
 		}
-		executeAndPrint(db, query)
+		executeAndPrint(ctx, conn, query)
 	}
 }
 
-func executeAndPrint(db *sql.DB, query string) {
-	rows, err := db.Query(query)
+func executeAndPrint(ctx context.Context, conn *pgx.Conn, query string) {
+	rows, err := conn.Query(ctx, query)
 	if err != nil {
 		fmt.Printf("ERROR: %v\n", err)
 		return
 	}
 	defer rows.Close()
 
-	cols, _ := rows.Columns()
-	fmt.Println(strings.Join(cols, " | "))
+	cols := rows.FieldDescriptions()
+	colNames := make([]string, len(cols))
+	for i, fd := range cols {
+		colNames[i] = fd.Name
+	}
+	fmt.Println(strings.Join(colNames, " | "))
+
 	for rows.Next() {
-		columns := make([]interface{}, len(cols))
-		columnPointers := make([]interface{}, len(cols))
-		for i := range columns {
-			columnPointers[i] = &columns[i]
+		values, err := rows.Values()
+		if err != nil {
+			fmt.Printf("ERROR scanning row: %v\n", err)
+			continue
 		}
-		rows.Scan(columnPointers...)
-		for _, val := range columns {
+		for _, val := range values {
 			fmt.Printf("%v | ", val)
 		}
 		fmt.Println()
