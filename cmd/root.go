@@ -36,6 +36,19 @@ func Execute() {
 	}
 }
 
+const defaultAWSRegion = "ap-south-1"
+
+// resolveRegion returns the effective AWS region: flag > AWS_REGION env > default (ap-south-1).
+func resolveRegion(flagRegion string) string {
+	if flagRegion != "" {
+		return flagRegion
+	}
+	if envRegion := os.Getenv("AWS_REGION"); envRegion != "" {
+		return envRegion
+	}
+	return defaultAWSRegion
+}
+
 func init() {
 	rootCmd.PersistentFlags().StringVarP(&awsProfile, "profile", "p", os.Getenv("AWS_PROFILE"), "AWS profile to use")
 	rootCmd.PersistentFlags().StringVarP(&awsRegion, "region", "r", "", "AWS Region (overrides config/env)")
