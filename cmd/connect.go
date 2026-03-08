@@ -26,8 +26,11 @@ var connectCmd = &cobra.Command{
 	Use:   "connect [rds-identifier]",
 	Short: "Connect to an RDS PostgreSQL instance",
 	Long: `Connect dynamically fetches credentials from AWS Secrets Manager 
-and establishes a connection using pgcli, psql, or a native Go fallback. 
-It requires an active Pritunl VPN connection matching the AWS Profile.`,
+and establishes a connection using pgcli, psql, or a native Go fallback.
+It requires an active Pritunl VPN connection matching the AWS Profile.
+
+Supports connecting by instance name, RDS host endpoint, or JDBC URL.
+Credentials are always resolved from Secrets Manager automatically.`,
 	Example: `  # Interactive selection
   rds connect
 
@@ -35,7 +38,19 @@ It requires an active Pritunl VPN connection matching the AWS Profile.`,
   rds connect acko-health
 
   # Reconnect to the last used instance for the current profile
-  rds connect -l`,
+  rds connect -l
+
+  # Connect to a specific database
+  rds connect my-instance --db myapp
+
+  # Connect by RDS host endpoint
+  rds connect --host my-rds.abc.ap-south-1.rds.amazonaws.com
+
+  # Connect via JDBC URL (DNS alias resolved automatically)
+  rds connect --url 'jdbc:postgresql://my-db.internal.example.com/myapp'
+
+  # Get JDBC URL for app config and copy to clipboard
+  rds connect my-instance --jdbc --copy`,
 	Args: cobra.MaximumNArgs(1),
 	Run:  runConnect,
 }
