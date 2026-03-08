@@ -64,3 +64,25 @@ func TestFindByName_EmptyList(t *testing.T) {
 		t.Fatal("FindByName: expected error for empty list, got nil")
 	}
 }
+
+func TestFindInstanceByEndpoint_Match(t *testing.T) {
+	meta := testMetabasePOCInstance()
+	instances := []InstanceInfo{meta}
+
+	got, err := FindInstanceByEndpoint(instances, meta.Host)
+	if err != nil {
+		t.Fatalf("FindInstanceByEndpoint: %v", err)
+	}
+	if got.ID != meta.ID {
+		t.Errorf("FindInstanceByEndpoint: got ID %q, want %q", got.ID, meta.ID)
+	}
+}
+
+func TestFindInstanceByEndpoint_NoMatch(t *testing.T) {
+	instances := []InstanceInfo{testMetabasePOCInstance()}
+
+	_, err := FindInstanceByEndpoint(instances, "nonexistent.rds.amazonaws.com")
+	if err == nil {
+		t.Fatal("FindInstanceByEndpoint: expected error for no match")
+	}
+}
