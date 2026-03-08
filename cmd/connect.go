@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/PraveenPrabhuT/rds/internal/connect"
+	"github.com/PraveenPrabhuT/rds/internal/core"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/spf13/cobra"
 )
@@ -58,7 +59,7 @@ func init() {
 			return nil, cobra.ShellCompDirectiveError
 		}
 
-		instances, err := connect.GetInstancesWithCache(ctx, cfg, awsProfile)
+		instances, err := core.GetInstancesWithCache(ctx, cfg, awsProfile)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveError
 		}
