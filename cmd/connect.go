@@ -49,6 +49,8 @@ func init() {
 			opts = append(opts, config.WithRegion(rFlag))
 		} else if envRegion := os.Getenv("AWS_REGION"); envRegion != "" {
 			opts = append(opts, config.WithRegion(envRegion))
+		} else {
+			opts = append(opts, config.WithRegion(defaultAWSRegion))
 		}
 
 		cfg, err := config.LoadDefaultConfig(ctx, opts...)
@@ -73,12 +75,27 @@ func init() {
 	rootCmd.AddCommand(connectCmd)
 }
 
+const defaultAWSRegion = "ap-south-1"
+
+// resolveRegion returns the effective AWS region: flag > AWS_REGION env > default (ap-south-1).
+func resolveRegion(flagRegion string) string {
+	if flagRegion != "" {
+		return flagRegion
+	}
+	if envRegion := os.Getenv("AWS_REGION"); envRegion != "" {
+		return envRegion
+	}
+	return defaultAWSRegion
+}
+
 func runConnect(c *cobra.Command, args []string) {
 	ctx := c.Context()
 
+	region := resolveRegion(awsRegion)
+
 	opts := connect.Options{
 		Profile:       awsProfile,
-		Region:        awsRegion,
+		Region:        region,
 		LastConnected: lastConnected,
 		Args:          args,
 	}
