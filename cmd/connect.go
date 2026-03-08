@@ -12,7 +12,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var lastConnected bool
+var (
+	lastConnected bool
+	connectPort   int
+	connectDB     string
+)
 
 var connectCmd = &cobra.Command{
 	Use:   "connect [rds-identifier]",
@@ -34,6 +38,8 @@ It requires an active Pritunl VPN connection matching the AWS Profile.`,
 
 func init() {
 	connectCmd.Flags().BoolVarP(&lastConnected, "last", "l", false, "Connect to the last used RDS instance")
+	connectCmd.Flags().IntVar(&connectPort, "port", 5432, "PostgreSQL port")
+	connectCmd.Flags().StringVarP(&connectDB, "db", "d", "postgres", "Database name to connect to")
 
 	connectCmd.ValidArgsFunction = func(c *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		if len(args) > 0 {
@@ -85,6 +91,8 @@ func runConnect(c *cobra.Command, args []string) {
 		Profile:       awsProfile,
 		Region:        region,
 		LastConnected: lastConnected,
+		Port:          connectPort,
+		DB:            connectDB,
 		Args:          args,
 	}
 

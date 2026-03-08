@@ -10,7 +10,7 @@ func TestBuildConnectArgs(t *testing.T) {
 	inst := core.InstanceInfo{Host: "db.example.com", Port: 5432}
 	creds := core.RDSCreds{Username: "admin", Password: "secret"}
 
-	args := buildConnectArgs(inst, creds)
+	args := buildConnectArgs(inst, creds, "postgres")
 
 	want := []string{"-h", "db.example.com", "-p", "5432", "-U", "admin", "-d", "postgres"}
 	if len(args) != len(want) {
@@ -34,7 +34,7 @@ func TestBuildConnectArgs_MetabasePOC(t *testing.T) {
 	}
 	creds := core.RDSCreds{Username: "postgres", Password: "test-secret"}
 
-	args := buildConnectArgs(inst, creds)
+	args := buildConnectArgs(inst, creds, "postgres")
 
 	if len(args) < 8 {
 		t.Fatalf("buildConnectArgs: got %d args", len(args))

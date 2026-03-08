@@ -13,6 +13,8 @@ type Options struct {
 	Profile       string
 	Region        string
 	LastConnected bool
+	Port          int
+	DB            string
 	Args          []string
 }
 
@@ -47,6 +49,15 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("selection: %w", selectErr)
 	}
 
+	if opts.Port != 0 && int32(opts.Port) != selected.Port {
+		selected.Port = int32(opts.Port)
+	}
+
+	dbname := opts.DB
+	if dbname == "" {
+		dbname = "postgres"
+	}
+
 	creds, err := core.GetRDSCredentials(ctx, cfg, selected, homeRegion)
 	if err != nil {
 		return fmt.Errorf("secrets: %w", err)
@@ -57,16 +68,16 @@ func Run(ctx context.Context, opts Options) error {
 
 	if path, err := exec.LookPath("pgcli"); err == nil {
 		fmt.Println("✨ Launching pgcli...")
-		executeExternal(path, selected, creds)
+		executeExternal(path, selected, creds, dbname)
 		return nil
 	}
 	if path, err := exec.LookPath("psql"); err == nil {
 		fmt.Println("📂 Launching psql...")
-		executeExternal(path, selected, creds)
+		executeExternal(path, selected, creds, dbname)
 		return nil
 	}
 
 	fmt.Println("⚠️  No binary clients found. Launching Native Fallback...")
-	runNativeConnect(selected.Host, selected.Port, creds.Username, creds.Password, "postgres")
+	runNativeConnect(selected.Host, selected.Port, creds.Username, creds.Password, dbname)
 	return nil
 }

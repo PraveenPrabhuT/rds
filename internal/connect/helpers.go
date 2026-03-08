@@ -12,12 +12,12 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func buildConnectArgs(inst core.InstanceInfo, creds core.RDSCreds) []string {
-	return []string{"-h", inst.Host, "-p", fmt.Sprintf("%d", inst.Port), "-U", creds.Username, "-d", "postgres"}
+func buildConnectArgs(inst core.InstanceInfo, creds core.RDSCreds, dbname string) []string {
+	return []string{"-h", inst.Host, "-p", fmt.Sprintf("%d", inst.Port), "-U", creds.Username, "-d", dbname}
 }
 
-func executeExternal(bin string, inst core.InstanceInfo, creds core.RDSCreds) {
-	args := buildConnectArgs(inst, creds)
+func executeExternal(bin string, inst core.InstanceInfo, creds core.RDSCreds, dbname string) {
+	args := buildConnectArgs(inst, creds, dbname)
 	cmd := exec.Command(bin, args...)
 	cmd.Env = append(os.Environ(), fmt.Sprintf("PGPASSWORD=%s", creds.Password))
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
