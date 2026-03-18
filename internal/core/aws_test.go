@@ -67,6 +67,63 @@ func TestInstanceSecretTargetID_ShortARN(t *testing.T) {
 	}
 }
 
+func TestRegionFromRDSARN(t *testing.T) {
+	tests := []struct {
+		name string
+		arn  string
+		want string
+	}{
+		{"valid RDS ARN", "arn:aws:rds:ap-south-1:663498825379:db:growth-hello", "ap-south-1"},
+		{"us-east-1", "arn:aws:rds:us-east-1:123456789012:db:my-db", "us-east-1"},
+		{"empty", "", ""},
+		{"non-RDS ARN", "arn:aws:secretsmanager:ap-south-1:123:secret:x", ""},
+		{"short ARN (parts 3 is returned)", "arn:aws:rds:a:b", "a"},
+		{"too short", "arn:aws:rds:ap-south-1", "ap-south-1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := regionFromRDSARN(tt.arn)
+			if got != tt.want {
+				t.Errorf("regionFromRDSARN(%q) = %q, want %q", tt.arn, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRegionFromSecretARN(t *testing.T) {
+	tests := []struct {
+		name string
+		arn  string
+		want string
+	}{
+		{"valid SM ARN", "arn:aws:secretsmanager:ap-south-1:663498825379:secret:rds!db-xxxx", "ap-south-1"},
+		{"us-east-1", "arn:aws:secretsmanager:us-east-1:123456789012:secret:my-secret", "us-east-1"},
+		{"empty", "", ""},
+		{"non-SM ARN", "arn:aws:rds:ap-south-1:123:db:my-db", ""},
+		{"short ARN (parts 3 is returned)", "arn:aws:secretsmanager:a:b", "a"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := regionFromSecretARN(tt.arn)
+			if got != tt.want {
+				t.Errorf("regionFromSecretARN(%q) = %q, want %q", tt.arn, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRDSCreds_UnmarshalManagedSecretJSON(t *testing.T) {
+	// AWS-managed RDS secret format: {"username":"postgres","password":"-------"}
+	payload := `{"username":"postgres","password":"secret123"}`
+	var creds RDSCreds
+	if err := json.Unmarshal([]byte(payload), &creds); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if creds.Username != "postgres" || creds.Password != "secret123" {
+		t.Errorf("got Username=%q Password=%q, want postgres / secret123", creds.Username, creds.Password)
+	}
+}
+
 func TestGetInstancesWithCache_CacheHit(t *testing.T) {
 	dir := t.TempDir()
 	os.Setenv("RDS_CACHE_DIR", dir)
