@@ -1,4 +1,4 @@
-package connect
+package core
 
 // CacheVersion is incremented when InstanceInfo (or cache format) changes.
 const CacheVersion = "v2"
