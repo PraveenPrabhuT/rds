@@ -64,7 +64,20 @@ func Run(ctx context.Context, opts Options) error {
 
 		selected, selectErr = core.FindInstanceByEndpoint(instances, resolved)
 		if selectErr != nil {
-			return fmt.Errorf("no RDS instance found for resolved host '%s' (from %s): %w", resolved, urlHost, selectErr)
+			// Private IPs in JDBC URLs often do not match DNS resolution of RDS
+			// hostnames from a laptop (different network path than VPC).
+			if len(opts.Args) > 0 {
+				selected, selectErr = core.FindByName(instances, opts.Args[0])
+				if selectErr != nil {
+					return fmt.Errorf("could not map JDBC host %q to an RDS endpoint, and instance %q: %w", urlHost, opts.Args[0], selectErr)
+				}
+			} else {
+				fmt.Printf("⚠️  Could not map JDBC host %q to an RDS endpoint (typical for private IPs). Pick the instance to load Secrets Manager credentials.\n", urlHost)
+				selected, selectErr = core.PickWithFuzzyFinder(instances)
+				if selectErr != nil {
+					return fmt.Errorf("selection: %w", selectErr)
+				}
+			}
 		}
 	} else {
 		switch {

@@ -2,6 +2,7 @@ package core
 
 import (
 	"fmt"
+	"net"
 	"strings"
 
 	"github.com/ktr0731/go-fuzzyfinder"
@@ -23,11 +24,26 @@ func PickWithFuzzyFinder(instances []InstanceInfo) (InstanceInfo, error) {
 }
 
 // FindInstanceByEndpoint resolves an instance by matching its Endpoint.Address
-// against the given host string.
+// against the given host string (exact hostname or IP). When host is an IP,
+// each instance's endpoint hostname is resolved to IP(s) and compared.
 func FindInstanceByEndpoint(instances []InstanceInfo, host string) (InstanceInfo, error) {
 	for _, inst := range instances {
 		if inst.Host == host {
 			return inst, nil
+		}
+	}
+	// When URL host is an IP (e.g. private IP), match by resolving instance endpoint to IP(s).
+	if ip := net.ParseIP(host); ip != nil {
+		for _, inst := range instances {
+			addrs, err := net.LookupHost(inst.Host)
+			if err != nil {
+				continue
+			}
+			for _, a := range addrs {
+				if a == host {
+					return inst, nil
+				}
+			}
 		}
 	}
 	return InstanceInfo{}, fmt.Errorf("no instance with endpoint '%s'", host)
