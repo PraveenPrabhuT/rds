@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/PraveenPrabhuT/rds/internal/core"
 )
@@ -47,8 +48,13 @@ func Run(ctx context.Context, opts Options) error {
 		dbname = "postgres"
 	}
 
-	if opts.JDBCURL != "" {
-		urlHost, urlPort, urlDB, parseErr := ParseJDBCURL(opts.JDBCURL)
+	jdbcURL := opts.JDBCURL
+	if jdbcURL == "" && len(opts.Args) == 1 && strings.HasPrefix(opts.Args[0], "jdbc:postgresql://") {
+		jdbcURL = opts.Args[0]
+	}
+
+	if jdbcURL != "" {
+		urlHost, urlPort, urlDB, parseErr := ParseJDBCURL(jdbcURL)
 		if parseErr != nil {
 			return fmt.Errorf("parse JDBC URL: %w", parseErr)
 		}
@@ -62,14 +68,14 @@ func Run(ctx context.Context, opts Options) error {
 			return fmt.Errorf("resolve CNAME for %s: %w", urlHost, err)
 		}
 
-		selected, selectErr = core.FindInstanceByEndpoint(instances, resolved)
+		selected, selectErr = core.FindInstanceByEndpointOrAlias(instances, resolved)
 		if selectErr != nil {
-			return fmt.Errorf("no RDS instance found for resolved host '%s' (from %s): %w", resolved, urlHost, selectErr)
+			return fmt.Errorf("no RDS instance found for host '%s' (from JDBC): %w", resolved, selectErr)
 		}
 	} else {
 		switch {
 		case opts.Host != "":
-			selected, selectErr = core.FindInstanceByEndpoint(instances, opts.Host)
+			selected, selectErr = core.FindInstanceByEndpointOrAlias(instances, opts.Host)
 		case len(opts.Args) > 0:
 			selected, selectErr = core.FindByName(instances, opts.Args[0])
 		case opts.LastConnected:

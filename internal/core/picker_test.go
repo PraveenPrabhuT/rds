@@ -1,6 +1,7 @@
 package core
 
 import (
+	"net"
 	"testing"
 )
 
@@ -84,5 +85,59 @@ func TestFindInstanceByEndpoint_NoMatch(t *testing.T) {
 	_, err := FindInstanceByEndpoint(instances, "nonexistent.rds.amazonaws.com")
 	if err == nil {
 		t.Fatal("FindInstanceByEndpoint: expected error for no match")
+	}
+}
+
+func TestFindInstanceByEndpointOrAlias_ExactEndpoint(t *testing.T) {
+	meta := testMetabasePOCInstance()
+	instances := []InstanceInfo{meta}
+
+	got, err := FindInstanceByEndpointOrAlias(instances, meta.Host)
+	if err != nil {
+		t.Fatalf("FindInstanceByEndpointOrAlias: %v", err)
+	}
+	if got.ID != meta.ID {
+		t.Errorf("got ID %q, want %q", got.ID, meta.ID)
+	}
+}
+
+func TestFindInstanceBySharedResolvedIPs_MatchByAliasIP(t *testing.T) {
+	shared := net.ParseIP("10.1.2.3")
+	lookup := func(host string) ([]net.IP, error) {
+		switch host {
+		case "alias.internal.example":
+			return []net.IP{shared}, nil
+		case "real.x.ap-south-1.rds.amazonaws.com":
+			return []net.IP{shared}, nil
+		default:
+			return nil, nil
+		}
+	}
+	instances := []InstanceInfo{
+		{ID: "central-2", Host: "real.x.ap-south-1.rds.amazonaws.com", Port: 5432},
+	}
+
+	got, err := findInstanceBySharedResolvedIPs(instances, "alias.internal.example", lookup)
+	if err != nil {
+		t.Fatalf("findInstanceBySharedResolvedIPs: %v", err)
+	}
+	if got.ID != "central-2" {
+		t.Errorf("got ID %q, want central-2", got.ID)
+	}
+}
+
+func TestFindInstanceBySharedResolvedIPs_Ambiguous(t *testing.T) {
+	shared := net.ParseIP("10.9.9.9")
+	lookup := func(host string) ([]net.IP, error) {
+		return []net.IP{shared}, nil
+	}
+	instances := []InstanceInfo{
+		{ID: "a", Host: "a.rds.amazonaws.com", Port: 5432},
+		{ID: "b", Host: "b.rds.amazonaws.com", Port: 5432},
+	}
+
+	_, err := findInstanceBySharedResolvedIPs(instances, "alias", lookup)
+	if err == nil {
+		t.Fatal("expected error when multiple instances share IP")
 	}
 }
