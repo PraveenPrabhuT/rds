@@ -49,6 +49,9 @@ Credentials are always resolved from Secrets Manager automatically.`,
   # Connect via JDBC URL (DNS alias resolved automatically)
   rds connect --url 'jdbc:postgresql://my-db.internal.example.com/myapp'
 
+  # JDBC URL with private IP: pass instance id if DNS cannot map the IP
+  rds connect --url 'jdbc:postgresql://172.31.x.x:5432/db' my-rds-instance-id
+
   # Get JDBC URL for app config and copy to clipboard
   rds connect my-instance --jdbc --copy`,
 	Args: cobra.MaximumNArgs(1),

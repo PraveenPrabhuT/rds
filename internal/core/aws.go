@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	smtypes "github.com/aws/aws-sdk-go-v2/service/secretsmanager/types"
 )
 
 // LoadAWSConfig returns both the working config (with the specified region)
@@ -104,8 +106,36 @@ func InstanceSecretTargetID(selected InstanceInfo) string {
 	return selected.SourceID
 }
 
+// regionFromRDSARN parses region from an RDS DB instance ARN (e.g. arn:aws:rds:ap-south-1:...).
+// Returns empty string if the ARN format is not recognized.
+func regionFromRDSARN(arn string) string {
+	if !strings.HasPrefix(arn, "arn:aws:rds:") {
+		return ""
+	}
+	parts := strings.Split(arn, ":")
+	if len(parts) < 4 {
+		return ""
+	}
+	return parts[3]
+}
+
+// regionFromSecretARN parses region from a Secrets Manager secret ARN.
+// Returns empty string if the ARN format is not recognized.
+func regionFromSecretARN(arn string) string {
+	if !strings.HasPrefix(arn, "arn:aws:secretsmanager:") {
+		return ""
+	}
+	parts := strings.Split(arn, ":")
+	if len(parts) < 4 {
+		return ""
+	}
+	return parts[3]
+}
+
 // GetRDSCredentials fetches the superuser credentials from AWS Secrets Manager
 // for the given instance. For DR replicas the primary instance's secret is used.
+// If the custom secret (root/{id}/psql) is not found, falls back to the AWS-managed
+// RDS master secret (MasterUserSecret) when the instance has it enabled.
 func GetRDSCredentials(ctx context.Context, cfg aws.Config, selected InstanceInfo, homeRegion string) (RDSCreds, error) {
 	secretTargetID := InstanceSecretTargetID(selected)
 	if selected.SourceID != "" && strings.HasPrefix(selected.SourceID, "arn:aws:rds:") && secretTargetID != selected.ID {
@@ -120,12 +150,70 @@ func GetRDSCredentials(ctx context.Context, cfg aws.Config, selected InstanceInf
 	secretID := fmt.Sprintf("root/%s/psql", secretTargetID)
 	out, err := sm.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{SecretId: &secretID})
 	if err != nil {
-		return RDSCreds{}, fmt.Errorf("failed to fetch secret '%s' in %s: %w", secretID, homeRegion, err)
+		var notFound *smtypes.ResourceNotFoundException
+		if !errors.As(err, &notFound) {
+			return RDSCreds{}, fmt.Errorf("failed to fetch secret '%s' in %s: %w", secretID, homeRegion, err)
+		}
+		// Fallback: AWS-managed RDS master secret
+		creds, fallbackErr := getRDSCredentialsFromManagedSecret(ctx, cfg, selected, secretTargetID, homeRegion)
+		if fallbackErr != nil {
+			return RDSCreds{}, fmt.Errorf("custom secret not found and fallback failed: %w", fallbackErr)
+		}
+		return creds, nil
 	}
 
 	var creds RDSCreds
 	if err := json.Unmarshal([]byte(*out.SecretString), &creds); err != nil {
 		return RDSCreds{}, err
+	}
+	return creds, nil
+}
+
+// getRDSCredentialsFromManagedSecret fetches credentials from the AWS-managed RDS
+// master secret (MasterUserSecret) for the given instance.
+func getRDSCredentialsFromManagedSecret(ctx context.Context, cfg aws.Config, selected InstanceInfo, secretTargetID, homeRegion string) (RDSCreds, error) {
+	fallbackRegion := cfg.Region
+	if secretTargetID != selected.ID && selected.SourceID != "" && strings.HasPrefix(selected.SourceID, "arn:aws:rds:") {
+		if r := regionFromRDSARN(selected.SourceID); r != "" {
+			fallbackRegion = r
+		} else {
+			fallbackRegion = homeRegion
+		}
+	}
+
+	rdsClient := rds.NewFromConfig(cfg, func(o *rds.Options) {
+		o.Region = fallbackRegion
+	})
+	descOut, err := rdsClient.DescribeDBInstances(ctx, &rds.DescribeDBInstancesInput{
+		DBInstanceIdentifier: &secretTargetID,
+	})
+	if err != nil {
+		return RDSCreds{}, fmt.Errorf("describe DB instance %s: %w", secretTargetID, err)
+	}
+	if len(descOut.DBInstances) == 0 {
+		return RDSCreds{}, fmt.Errorf("no DB instance found for %s", secretTargetID)
+	}
+	db := descOut.DBInstances[0]
+	if db.MasterUserSecret == nil || db.MasterUserSecret.SecretArn == nil || aws.ToString(db.MasterUserSecret.SecretArn) == "" {
+		return RDSCreds{}, fmt.Errorf("no AWS-managed secret for instance %s (enable Manage master user password in Secrets Manager)", secretTargetID)
+	}
+	secretArn := aws.ToString(db.MasterUserSecret.SecretArn)
+	secretRegion := fallbackRegion
+	if r := regionFromSecretARN(secretArn); r != "" {
+		secretRegion = r
+	}
+	sm := secretsmanager.NewFromConfig(cfg, func(o *secretsmanager.Options) {
+		o.Region = secretRegion
+	})
+	secretOut, err := sm.GetSecretValue(ctx, &secretsmanager.GetSecretValueInput{
+		SecretId: &secretArn,
+	})
+	if err != nil {
+		return RDSCreds{}, fmt.Errorf("fetch managed secret for %s: %w", secretTargetID, err)
+	}
+	var creds RDSCreds
+	if err := json.Unmarshal([]byte(*secretOut.SecretString), &creds); err != nil {
+		return RDSCreds{}, fmt.Errorf("parse managed secret for %s: %w", secretTargetID, err)
 	}
 	return creds, nil
 }
